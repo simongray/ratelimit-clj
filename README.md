@@ -10,16 +10,22 @@ from your own code, e.g. to limit calls to an external API.
   seconds, as in the RateLimit-Policy field of the
   [IETF draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/).
   Several can apply to one request, e.g. a burst limit and a daily quota.
-- **Three algorithms.** GCRA by default, or a fixed or a sliding window.
-  Each is a pure function of a key's state, the time and the cost.
+- **Three algorithms.** By default the
+  [generic cell rate algorithm](https://en.wikipedia.org/wiki/Generic_cell_rate_algorithm)
+  (GCRA), or a fixed or a sliding window. Each is a pure function of a
+  key's state, the time and the cost.
 - **Exact under load.** The memory store updates each key atomically, so
   concurrent requests never get past a limit. It drops idle keys.
 - **Client addresses behind proxies.** It reads the address that your own
-  proxy added to X-Forwarded-For or Forwarded, and counts an IPv6 address
-  by its first 64 bits.
+  proxy added to
+  [X-Forwarded-For](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/X-Forwarded-For)
+  or [Forwarded](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Forwarded),
+  and counts an IPv6 address by its first 64 bits.
 - **Standard responses.** A
   [429 Too Many Requests](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/429)
-  with a Retry-After that a client can trust, as
+  with a
+  [Retry-After](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Retry-After)
+  that a client can trust, as
   [RFC 6585](https://www.rfc-editor.org/rfc/rfc6585#section-4) and
   [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3) define
   them, and the RateLimit fields if you want them.
@@ -93,12 +99,12 @@ others, so a client that the burst limit blocks keeps its daily quota.
 
 The algorithms count in different ways:
 
-- **[GCRA](https://brandur.org/rate-limiting)**, the generic cell rate
-  algorithm, allows the same requests as a
-  [token bucket](https://en.wikipedia.org/wiki/Token_bucket) but keeps a
-  single number per key. A client can use its quota at once, and then
-  gets a unit back every window/quota seconds. So in its first window, it
-  can make almost twice the quota. A lower :burst tightens that.
+- **[GCRA](https://brandur.org/rate-limiting)** allows the same requests
+  as a [token bucket](https://en.wikipedia.org/wiki/Token_bucket) but
+  keeps a single number per key. A client can use its quota at once, and
+  then gets a unit back every window/quota seconds. So in its first
+  window, it can make almost twice the quota. A lower :burst tightens
+  that.
 - **A fixed window** counts the units in windows aligned to the clock, so
   a daily window resets at midnight UTC. Around the end of a window, a
   client can make twice the quota.
