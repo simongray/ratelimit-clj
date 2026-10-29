@@ -86,7 +86,10 @@
   window and the key `k`."
   [{:keys [quota window] :as policy} k result]
   (-> (dissoc result :state)
-      (assoc :name (policy-name policy) :quota quota :window window :key k)))
+      (assoc :name   (policy-name policy)
+             :quota  quota
+             :window (algorithm/window-seconds window)
+             :key    k)))
 
 ;; a refused request takes nothing from any policy
 (defn- settle!
@@ -97,6 +100,11 @@
           (if (and refused? (:allowed? result) (pos? cost))
             (refund! store policy key cost now)
             result)))
+
+(defn as-policies
+  "The `policies` as a coll, also when it's a single policy map."
+  [policies]
+  (if (map? policies) [policies] policies))
 
 (defn limit!
   "The decision for the Ring `request` by the `policies`, which take units
@@ -119,8 +127,9 @@
   (cond
     (not (map? policy))                          "a policy is a map"
     (not (pos-int? quota))                       ":quota is a positive integer"
-    (not (and (number? window) (pos? window)))
-    ":window is a positive number of seconds"
+    (not (or (contains? algorithm/windows window)
+             (and (number? window) (pos? window))))
+    ":window is a positive number, or :second, :minute, :hour or :day"
     (and (some? burst) (not (pos-int? burst)))   ":burst is a positive integer"
     (not (contains? #{nil :gcra :fixed-window :sliding-window} algorithm))
     ":algorithm is :gcra, :fixed-window or :sliding-window"

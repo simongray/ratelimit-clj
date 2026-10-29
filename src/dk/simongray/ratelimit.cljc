@@ -1,8 +1,9 @@
 (ns dk.simongray.ratelimit
   "Limits on how often each client can make requests.
 
-  A policy is a map of a :name, a :quota of units and a :window in seconds,
-  like an item of the RateLimit-Policy field. It also takes:
+  A policy is a map of a :name, a :quota of units and a :window, like an
+  item of the RateLimit-Policy field. The window is a number of seconds,
+  or :second, :minute, :hour or :day. A policy also takes:
 
   - :burst, the most units at once with GCRA, by default the quota
   - :algorithm, which is :gcra by default, :fixed-window or
@@ -51,7 +52,9 @@
 
   It drops a key's entry once the key is back to the state of a new key:
   at once when an update leaves it there, or else in a sweep. Updates run
-  the sweep every so often, so the store needs no thread. The `opts` are:
+  the sweep every so often, so the store needs no thread. It counts in
+  this process only, so with several servers, a client can use the quota
+  on each of them. The `opts` are:
 
   - :sweep-every, the seconds between sweeps, by default 60"
   ([]
@@ -75,9 +78,10 @@
 
 (defn limit!
   "The decision for the Ring `request` by the `policies`, which take units
-  in the `store` at `now` or else at the time on the system clock.
+  in the `store` at `now` or else at the time on the system clock. The
+  `policies` can also be a single policy.
 
-      (limit! [{:name \"pages\" :quota 400 :window 60}]
+      (limit! {:name \"pages\" :quota 400 :window :minute}
               (memory-store)
               {:remote-addr \"203.0.113.7\"})
       ;; => {:results [{:name        \"pages\"
@@ -99,7 +103,7 @@
   ([policies store request]
    (limit! policies store request (decision/now)))
   ([policies store request now]
-   (decision/limit! policies store request now)))
+   (decision/limit! (decision/as-policies policies) store request now)))
 
 (defn client-address
   "The address of the client of the Ring `request`, with the `opts` below.

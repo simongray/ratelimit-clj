@@ -93,9 +93,62 @@
                              [[{:quota 1 :window 1 :burst 1.5}] {}]
                              [[{:quota 1 :window 1 :name "\n"}] {}]
                              [[{:quota 1 :window 1} {:quota 2 :window 1}] {}]
-                             [[{:quota 1 :window 1}] {:headers :draft-99}]]]
+                             [[{:quota 1 :window :fortnight}] {}]
+                             [[{:quota 1 :window 1}] {:headers :draft-99}]
+                             [[{:quota 1 :window 1}] {:proxies "1"}]]]
       (is (thrown? #?(:clj Exception :cljs js/Error)
                    (ratelimit.ring/wrap-rate-limit handler policies opts))))))
+
+(defn- through-proxy
+  "The statuses of requests to the `app` from clients at the `addresses`,
+  through one proxy."
+  [app addresses]
+  (mapv #(:status (app {:remote-addr "10.0.0.2"
+                        :headers     {"x-forwarded-for" %}}))
+        addresses))
+
+(deftest proxies
+  (let [clock {:clock (constantly 0)}]
+    (testing "without :proxies, the clients share the proxy's limit"
+      (is (= [200 200 429]
+             (through-proxy (ratelimit.ring/wrap-rate-limit handler policies
+                                                            (assoc clock :proxies 0))
+                            ["203.0.113.1" "203.0.113.2" "198.51.100.3"]))))
+    (testing "with :proxies, each client has its own"
+      (is (= [200 200 200 200 429]
+             (through-proxy (ratelimit.ring/wrap-rate-limit handler policies
+                                                            (assoc clock :proxies 1))
+                            ["203.0.113.1" "203.0.113.2" "198.51.100.3"
+                             "203.0.113.1" "203.0.113.1"]))))
+    (testing "a policy's own :key stays"
+      (is (= [200 200 429]
+             (through-proxy (ratelimit.ring/wrap-rate-limit
+                             handler
+                             [{:quota 2 :window 1 :key (constantly :everyone)}]
+                             (assoc clock :proxies 1))
+                            ["203.0.113.1" "203.0.113.2" "198.51.100.3"]))))))
+
+#?(:clj
+   (deftest proxy-warning
+     (let [warnings (fn [policies opts]
+                      (let [err (java.io.StringWriter.)]
+                        (binding [*err* err]
+                          (through-proxy (ratelimit.ring/wrap-rate-limit
+                                          handler policies
+                                          (assoc opts :clock (constantly 0)))
+                                         ["203.0.113.1" "203.0.113.2"]))
+                        (count (re-seq #"ratelimit-clj:" (str err)))))]
+       (is (= 1 (warnings policies {})) "once, not for every request")
+       (is (= 0 (warnings policies {:proxies 0})))
+       (is (= 0 (warnings policies {:proxies 1})))
+       (is (= 0 (warnings [{:quota 2 :window 1 :key :uri}] {}))
+           "no policy counts by the default key"))))
+
+(deftest one-policy
+  (let [app (ratelimit.ring/wrap-rate-limit handler {:quota 1 :window :minute}
+                                            {:clock (constantly 0)})]
+    (is (= [200 429] (map :status (repeatedly 2 #(app request)))))
+    (is (= "60" (get-in (app request) [:headers "Retry-After"])))))
 
 (deftest pedestal
   (let [{:keys [enter leave]} (ratelimit.pedestal/rate-limit policies

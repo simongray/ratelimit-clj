@@ -5,7 +5,8 @@
 
 (defn wrap-rate-limit
   "Ring middleware that applies the `policies` to each request before the
-  `handler` gets it, with the `opts` below.
+  `handler` gets it, with the `opts` below. The `policies` can also be a
+  single policy.
 
   The handler finds the decision of limit! in the request, under
   :dk.simongray.ratelimit/decision. When a policy refuses the request, the
@@ -13,6 +14,10 @@
 
   The `opts` are:
 
+  - :proxies, the number of proxies of your own in front of the server.
+    Policies without a :key then count each client by the address that
+    the outermost proxy added to X-Forwarded-For. Without :proxies, the
+    middleware warns once when a request has that field.
   - :store, where the state of each key lives, by default a new memory
     store
   - :clock, a function that returns the time in milliseconds, by default

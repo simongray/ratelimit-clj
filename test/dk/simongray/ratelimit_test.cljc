@@ -167,6 +167,22 @@
         (is (= 4 (-> (decide {:uri "/api" :request-method :get :headers {"x-api-key" "a"}})
                      :results first :remaining)))))))
 
+(deftest window-names
+  (doseq [[k seconds] [[:second 1] [:minute 60] [:hour 3600] [:day 86400]]]
+    (is (= (ratelimit/consume {:quota 10 :window seconds} nil 0 1)
+           (ratelimit/consume {:quota 10 :window k} nil 0 1))))
+  (is (= {:results [{:name         "default"
+                     :quota        10
+                     :window       60
+                     :key          "a"
+                     :allowed?     true
+                     :remaining    9
+                     :reset-after  6.0
+                     :refill-after 6.0}]}
+         (ratelimit/limit! {:quota 10 :window :minute} (ratelimit/memory-store)
+                           {:remote-addr "a"} 0))
+      "a single policy, and its window in seconds"))
+
 (deftest responses
   (let [decision {:results [{:name "burst" :quota 3 :window 1 :allowed? false
                              :remaining 0 :retry-after 0.2 :refill-after 0.2}

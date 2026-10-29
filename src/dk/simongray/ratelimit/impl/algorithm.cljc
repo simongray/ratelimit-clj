@@ -16,6 +16,16 @@
   "The slack in comparisons of units, against the rounding of doubles."
   1e-9)
 
+(def windows
+  "The windows that a policy can name, in seconds."
+  {:second 1 :minute 60 :hour 3600 :day 86400})
+
+(defn window-seconds
+  "The `window` of a policy in seconds: a number of them, or a name in
+  windows."
+  [window]
+  (get windows window window))
+
 ;; The numbers of a policy as primitive fields, read from its map once for
 ;; each call rather than once for each question
 (deftype Limits [algorithm
@@ -31,7 +41,7 @@
   ^Limits [{:keys [algorithm quota window burst] :as policy}]
   (let [algorithm (or algorithm :gcra)
         quota     (double quota)
-        window    (* 1000.0 (double window))]
+        window    (* 1000.0 (double (window-seconds window)))]
     (Limits. algorithm
              quota
              (if (and burst (= :gcra algorithm)) (double burst) quota)

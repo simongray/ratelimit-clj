@@ -26,8 +26,8 @@ from your own code, e.g. to limit calls to an external API.
   with a
   [Retry-After](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Retry-After)
   that a client can trust, as
-  [RFC 6585](https://www.rfc-editor.org/rfc/rfc6585#section-4) and
-  [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3) define
+  [RFC 6585](https://www.rfc-editor.org/rfc/rfc6585.html#section-4) and
+  [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.3) define
   them, and the RateLimit fields if you want them.
 - **No request breaks it.** No function throws on anything a client
   sends.
@@ -58,21 +58,32 @@ around your handler:
 (require '[dk.simongray.ratelimit.ring :as ratelimit.ring])
 
 (def app
-  (ratelimit.ring/wrap-rate-limit handler
-                                  [{:name "pages" :quota 400 :window 60}]))
+  (ratelimit.ring/wrap-rate-limit handler {:quota 400 :window :minute}))
 ```
 
 A client that goes over the limit gets a 429 with a
 [Retry-After](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Retry-After),
-and your handler isn't called. The client is the request's :remote-addr,
-unless you say otherwise, e.g. behind a proxy (see
-[Client addresses](#client-addresses)).
+and your handler isn't called.
+
+Behind a proxy, e.g. nginx or a load balancer, every request comes from
+the proxy's address. Give the number of proxies in front of the server,
+or all clients share one limit:
+
+```clojure
+(def app
+  (ratelimit.ring/wrap-rate-limit handler {:quota 400 :window :minute}
+                                  {:proxies 1}))
+```
+
+The middleware warns once when a request comes through a proxy and
+:proxies isn't set. For other common tasks, e.g. a limit per API key or
+on login attempts, see the [recipes](doc/recipes.md).
 
 Policies
 --------
 
-A policy has a :name, a :quota of units and a :window in seconds. It can
-also have:
+A policy has a :name, a :quota of units and a :window: a number of
+seconds, or :second, :minute, :hour or :day. It can also have:
 
 - :burst, the most units at once with GCRA, by default the quota
 - :algorithm, which is :gcra by default, :fixed-window or
@@ -86,7 +97,7 @@ also have:
 ```clojure
 (def policies
   [{:name "burst" :quota 10 :window 1}
-   {:name "daily" :quota 5000 :window 86400 :algorithm :fixed-window}
+   {:name "daily" :quota 5000 :window :day :algorithm :fixed-window}
    {:name   "search"
     :quota  60
     :window 60
@@ -94,8 +105,10 @@ also have:
     :cost   #(if (= :post (:request-method %)) 5 1)}])
 ```
 
-When one policy refuses a request, the request takes nothing from the
-others, so a client that the burst limit blocks keeps its daily quota.
+A request counts against every policy whose :when matches it, so the
+middleware takes a vector of them as well as one. When one policy refuses
+a request, the request takes nothing from the others, so a client that the
+burst limit blocks keeps its daily quota.
 
 The algorithms count in different ways:
 
@@ -139,8 +152,10 @@ When a policy refuses the request, the decision lists its name under
 
 The middleware takes these options:
 
+- :proxies, the number of proxies of your own in front of the server
 - :store, where the state of each key lives, by default a new memory
-  store
+  store. It counts in this process only, so with several servers, a
+  client can use the quota on each of them.
 - :clock, a function that returns the time in milliseconds, by default
   the system clock
 - :too-many-requests, a function of the request and the decision that
@@ -175,10 +190,11 @@ A 429 from the interceptor ends the chain.
 Client addresses
 ----------------
 
-The default key is the client's address. Since a host often has a whole
-[/64](https://www.rfc-editor.org/rfc/rfc7934#section-8), an IPv6 address
+The default key is the client's address, as `ratelimit/client-address`
+finds it. Since a host often has a whole
+[/64](https://www.rfc-editor.org/rfc/rfc7934.html#section-8), an IPv6 address
 counts by its first 64 bits, written as
-[RFC 5952](https://www.rfc-editor.org/rfc/rfc5952) says:
+[RFC 5952](https://www.rfc-editor.org/rfc/rfc5952.html) says:
 
 ```clojure
 (require '[dk.simongray.ratelimit :as ratelimit])
@@ -187,9 +203,9 @@ counts by its first 64 bits, written as
 ;; => "2001:db8:cafe:17::/64"
 ```
 
-Behind proxies of your own, the :remote-addr is your proxy's. Pass the
-number of proxies, and the address is the one that the outermost proxy
-added to
+Behind proxies of your own, the :remote-addr is your proxy's. With the
+number of proxies, the address is the one that the outermost proxy added
+to
 [X-Forwarded-For](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/X-Forwarded-For):
 
 ```clojure
@@ -200,11 +216,12 @@ added to
 ;; => "203.0.113.7"
 ```
 
-The entries to the left of it came from the client, which can write
-anything there, so only use :proxies when clients can't reach your
-server around the proxies. For a proxy that adds to the
+The middleware's :proxies option does this for each policy without a
+:key. The entries to the left of the address came from the client, which
+can write anything there, so only use :proxies when clients can't reach
+your server around the proxies. For a proxy that adds to the
 [Forwarded](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Forwarded)
-field of [RFC 7239](https://www.rfc-editor.org/rfc/rfc7239) instead, give
+field of [RFC 7239](https://www.rfc-editor.org/rfc/rfc7239.html) instead, give
 :header "forwarded". The :prefix option sets how many bits of an IPv6
 address count.
 
@@ -265,7 +282,7 @@ Choices that the standard leaves open
   client that retries too soon, but it would also keep a client blocked
   for as long as it keeps trying.
 - **Retry-After is in seconds, rounded up**, as
-  [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)
+  [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.3)
   allows. A client that waits that long gets through. Seconds also don't
   depend on the clocks agreeing.
 - **A request that costs more than a policy ever allows** gets a 429
@@ -277,7 +294,7 @@ Choices that the standard leaves open
   the library never falls back from one to the other.
 - **Nothing is exempt by default**, not even /robots.txt. A crawler that
   gets a 4xx for it
-  [may fetch anything](https://www.rfc-editor.org/rfc/rfc9309#section-2.3.1.3),
+  [may fetch anything](https://www.rfc-editor.org/rfc/rfc9309.html#section-2.3.1.3),
   so leave it out with :when.
 
 Other Clojure libraries
