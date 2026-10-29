@@ -2,24 +2,27 @@ ratelimit-clj
 =============
 
 This library limits how often each client can make requests, in Clojure
-and ClojureScript. Use it as Ring middleware or a Pedestal interceptor, or
-call it from your own code, e.g. to limit calls to an external API.
+and ClojureScript. Use it as [Ring](https://github.com/ring-clojure/ring)
+middleware or a [Pedestal](https://pedestal.io/) interceptor, or call it
+from your own code, e.g. to limit calls to an external API.
 
 - **Limits as data.** A policy is a map of a quota and a window in
-  seconds, as in the RateLimit-Policy field of the IETF draft. Several
-  policies can apply to one request, e.g. a burst limit and a daily quota,
-  and a request that one of them refuses takes nothing from the others.
-- **Three algorithms.** GCRA by default, which gives each client a steady
-  rate with room for bursts, or a fixed or a sliding window. Each is a
-  pure function of a key's state, the time and the cost.
+  seconds, as in the RateLimit-Policy field of the
+  [IETF draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/).
+  Several can apply to one request, e.g. a burst limit and a daily quota.
+- **Three algorithms.** GCRA by default, or a fixed or a sliding window.
+  Each is a pure function of a key's state, the time and the cost.
 - **Exact under load.** The memory store updates each key atomically, so
-  concurrent requests never get past a limit. It drops a key's entry once
-  the key is idle.
-- **Client addresses behind proxies.** It takes the address that your own
+  concurrent requests never get past a limit. It drops idle keys.
+- **Client addresses behind proxies.** It reads the address that your own
   proxy added to X-Forwarded-For or Forwarded, and counts an IPv6 address
-  by its first 64 bits, since a host often has a whole /64.
-- **Standard responses.** A 429 with a Retry-After that a client can
-  trust, and the RateLimit fields of the IETF draft if you want them.
+  by its first 64 bits.
+- **Standard responses.** A
+  [429 Too Many Requests](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/429)
+  with a Retry-After that a client can trust, as
+  [RFC 6585](https://www.rfc-editor.org/rfc/rfc6585#section-4) and
+  [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3) define
+  them, and the RateLimit fields if you want them.
 - **No request breaks it.** No function throws on anything a client
   sends.
 - **The same results everywhere.** One codebase runs on the JVM, in Node
@@ -48,19 +51,11 @@ around your handler:
                                   [{:name "pages" :quota 400 :window 60}]))
 ```
 
-A client that goes over the limit gets this response, and your handler
-isn't called:
-
-```clojure
-{:status  429
- :headers {"Retry-After"   "1"
-           "Cache-Control" "no-store"
-           "Content-Type"  "text/plain;charset=utf-8"}
- :body    "Too many requests. Try again in 1 second."}
-```
-
-By default, the client is the request's :remote-addr. Behind a proxy of
-your own, see [Client addresses](#client-addresses).
+A client that goes over the limit gets a 429 with a
+[Retry-After](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Retry-After),
+and your handler isn't called. The client is the request's :remote-addr,
+unless you say otherwise, e.g. behind a proxy (see
+[Client addresses](#client-addresses)).
 
 Policies
 --------
@@ -77,8 +72,6 @@ also have:
   all of them
 - :cost, a function of the request that returns its units, by default 1
 
-Each policy counts the requests that its :when matches:
-
 ```clojure
 (def policies
   [{:name "burst" :quota 10 :window 1}
@@ -90,20 +83,24 @@ Each policy counts the requests that its :when matches:
     :cost   #(if (= :post (:request-method %)) 5 1)}])
 ```
 
-When one of them refuses a request, the request takes nothing from the
+When one policy refuses a request, the request takes nothing from the
 others, so a client that the burst limit blocks keeps its daily quota.
 
 The algorithms count in different ways:
 
-- **GCRA** lets a client use its quota at once, and then gives it a unit
-  back every window/quota seconds. So in its first window, a client can
-  make almost twice the quota. A lower :burst tightens that.
+- **[GCRA](https://brandur.org/rate-limiting)**, the generic cell rate
+  algorithm, allows the same requests as a
+  [token bucket](https://en.wikipedia.org/wiki/Token_bucket) but keeps a
+  single number per key. A client can use its quota at once, and then
+  gets a unit back every window/quota seconds. So in its first window, it
+  can make almost twice the quota. A lower :burst tightens that.
 - **A fixed window** counts the units in windows aligned to the clock, so
   a daily window resets at midnight UTC. Around the end of a window, a
   client can make twice the quota.
 - **A sliding window** counts the current window in full, and the window
-  before it by the part that the sliding window still covers. That keeps
-  the count over any span of one window close to the quota.
+  before it by the part that the sliding window still covers, as
+  [Cloudflare describes](https://blog.cloudflare.com/counting-things-a-lot-of-different-things/).
+  That keeps the count over any span of one window close to the quota.
 
 Ring and Pedestal
 -----------------
@@ -122,8 +119,8 @@ The middleware puts its decision in the request, under
             :refill-after 0.15}]}
 ```
 
-When a policy refuses the request, the decision lists the policy's name
-under :limited. The durations are in seconds:
+When a policy refuses the request, the decision lists its name under
+:limited. The durations are in seconds:
 
 - :retry-after, until a refused request could pass
 - :refill-after, until :remaining goes up
@@ -145,12 +142,12 @@ The middleware takes these options:
 - :headers, a draft of the RateLimit fields, such as :draft-11, to add
   them to every response
 
-The middleware works with both synchronous and asynchronous handlers,
-and throws when a policy or an option is wrong.
+The middleware works with both synchronous and asynchronous handlers, and
+throws when a policy or an option is wrong.
 
-For Pedestal, put the interceptor in a route, or pass it to
-`io.pedestal.interceptor/interceptor` to use it among the interceptors of
-a service. It takes the same options:
+The Pedestal interceptor takes the same options. Put it in a route, or
+pass it to `io.pedestal.interceptor/interceptor` to use it among the
+interceptors of a service:
 
 ```clojure
 (require '[dk.simongray.ratelimit.pedestal :as ratelimit.pedestal])
@@ -162,14 +159,15 @@ a service. It takes the same options:
   #{["/word/:id" :get [rate-limit word-handler] :route-name ::word]})
 ```
 
-On enter, the interceptor puts the decision in the request, or sets a 429
-that ends the chain. On leave, it adds the RateLimit fields when :headers
-asks for them.
+A 429 from the interceptor ends the chain.
 
 Client addresses
 ----------------
 
-The default key is the client's address:
+The default key is the client's address. Since a host often has a whole
+[/64](https://www.rfc-editor.org/rfc/rfc7934#section-8), an IPv6 address
+counts by its first 64 bits, written as
+[RFC 5952](https://www.rfc-editor.org/rfc/rfc5952) says:
 
 ```clojure
 (require '[dk.simongray.ratelimit :as ratelimit])
@@ -180,7 +178,8 @@ The default key is the client's address:
 
 Behind proxies of your own, the :remote-addr is your proxy's. Pass the
 number of proxies, and the address is the one that the outermost proxy
-added to X-Forwarded-For:
+added to
+[X-Forwarded-For](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/X-Forwarded-For):
 
 ```clojure
 (ratelimit/client-address
@@ -191,32 +190,22 @@ added to X-Forwarded-For:
 ```
 
 The entries to the left of it came from the client, which can write
-anything there. Only use :proxies when clients can't reach your server
-around the proxies. For a proxy that adds to the Forwarded field of RFC
-7239 instead, give :header "forwarded". The :prefix option sets how many
-bits of an IPv6 address count.
+anything there, so only use :proxies when clients can't reach your
+server around the proxies. For a proxy that adds to the
+[Forwarded](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Forwarded)
+field of [RFC 7239](https://www.rfc-editor.org/rfc/rfc7239) instead, give
+:header "forwarded". The :prefix option sets how many bits of an IPv6
+address count.
 
 A key can be any value, e.g. a vector of the client's address and its
-User-Agent:
-
-```clojure
-(defn client
-  "The client of the `request` behind one proxy, by its address and its
-  User-Agent."
-  [request]
-  [(ratelimit/client-address request {:proxies 1})
-   (get-in request [:headers "user-agent"])])
-```
+User-Agent.
 
 Responses and headers
 ---------------------
 
-To answer a refused request yourself, build on `ratelimit/retry-after`,
-which returns the Retry-After value of a decision, or on
-`ratelimit/too-many-requests`, which returns the whole 429.
-
-The RateLimit and RateLimit-Policy fields come from an IETF draft that
-is still changing, so you choose the version:
+For a 429 of your own, build on `ratelimit/too-many-requests` or
+`ratelimit/retry-after`. The RateLimit and RateLimit-Policy fields come
+from the IETF draft, which is still changing, so you choose its version:
 
 ```clojure
 (ratelimit/headers decision :draft-11)
@@ -225,22 +214,16 @@ is still changing, so you choose the version:
 ```
 
 In RateLimit, t is the time until the available quota next goes up. A
-shared cache can replay a successful response with these fields to other
-clients, so only turn them on for responses that such caches don't
-store.
+[shared cache](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Caching)
+can replay a successful response with these fields to other clients, so
+only turn them on for responses that such caches don't store.
 
 Without HTTP
 ------------
 
-You can also use the library without the middleware:
-
-- `ratelimit/limit!` applies policies to a Ring request and returns the
-  decision.
-- `ratelimit/consume!` takes units from one key in a store.
-- `ratelimit/consume` is the arithmetic itself: it takes the state of a
-  key, the time and a cost, and returns the result with the new state.
-
-For example, to wait for a slot before each call to an external API:
+To limit something other than requests, take units from a key yourself
+with `ratelimit/consume!`. For example, to wait before each call to an
+external API until its limit allows it:
 
 ```clojure
 (def store
@@ -257,18 +240,23 @@ For example, to wait for a slot before each call to an external API:
           (recur f)))))
 ```
 
-To keep the state elsewhere, e.g. in Redis, implement the protocol
-`dk.simongray.ratelimit.store/Store`. Its one function applies an update
-to the state of one key atomically.
+The arithmetic itself is `ratelimit/consume`, a function of a key's
+state, the time and a cost, and `ratelimit/limit!` decides a whole Ring
+request. To keep the state elsewhere, e.g. in
+[Redis](https://redis.io/), implement the protocol
+`dk.simongray.ratelimit.store/Store`. Its one function updates the state
+of one key atomically.
 
 Choices that the standard leaves open
 -------------------------------------
 
 - **A refused request takes nothing.** Counting refusals would punish a
-  client that retries too soon, but it also keeps a client blocked for as
-  long as it keeps trying.
-- **Retry-After is in seconds, rounded up.** A client that waits that
-  long gets through. Seconds also don't depend on the clocks agreeing.
+  client that retries too soon, but it would also keep a client blocked
+  for as long as it keeps trying.
+- **Retry-After is in seconds, rounded up**, as
+  [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)
+  allows. A client that waits that long gets through. Seconds also don't
+  depend on the clocks agreeing.
 - **A request that costs more than a policy ever allows** gets a 429
   without a Retry-After, since waiting won't help.
 - **When the field has fewer entries than :proxies**, the leftmost one
@@ -277,24 +265,31 @@ Choices that the standard leaves open
   X-Forwarded-For, a Forwarded field can only come from the client, so
   the library never falls back from one to the other.
 - **Nothing is exempt by default**, not even /robots.txt. A crawler that
-  gets a 4xx for it may fetch anything, so leave it out with :when.
+  gets a 4xx for it
+  [may fetch anything](https://www.rfc-editor.org/rfc/rfc9309#section-2.3.1.3),
+  so leave it out with :when.
 
 Other Clojure libraries
 -----------------------
 
-Here is how each library fares on five cases, with a simulated clock where
-it can take one (encore 3.172.1, ring-congestion 0.1.3,
-io.staticweb/rate-limit 1.1.0, ring-ratelimit 0.2.3, clj-rate-limiter
-0.1.6-RC1 and clj-bucket4j 0.1.4). Wrong results are in bold:
+Here is how each library does on five cases, with a simulated clock where
+it can take one. The libraries are
+[encore](https://github.com/taoensso/encore) 3.172.1,
+[ring-congestion](https://github.com/liwp/ring-congestion) 0.1.3,
+[io.staticweb/rate-limit](https://github.com/staticweb-io/rate-limit)
+1.1.0, [ring-ratelimit](https://codeberg.org/valpackett/ring-ratelimit)
+0.2.3, [clj-rate-limiter](https://github.com/killme2008/clj-rate-limiter)
+0.1.6-RC1 and [clj-bucket4j](https://github.com/fr33m0nk/clj-bucket4j)
+0.1.4, which wraps [Bucket4j](https://bucket4j.com/). Wrong results are in
+bold.
 
-1. Edge: a limit of 10 a second, with 1 request at 0 s, 9 at 0.9 s and
-   10 at 1.1 s. A sliding window allows 11, and a token bucket 13.
+1. Edge: 10 a second, with 1 request at 0 s, 9 at 0.9 s and 10 at 1.1 s.
+   A sliding window allows 11, and a token bucket 13.
 2. Retry-After, when the true wait is 7.7 s.
-3. Steady: a limit of 400 a minute, and one request every 150 ms for
-   three minutes. None should be blocked.
+3. Steady: 400 a minute, and a request every 150 ms for three minutes.
+   None should be blocked.
 4. Threads: 32 threads on one key with a limit of 100.
-5. Eviction: what happens to the entries of 100,000 clients once their
-   window has passed.
+5. Eviction: the entries of 100,000 clients once their window has passed.
 
 | Case | ratelimit-clj | encore | ring-congestion | io.staticweb | ring-ratelimit | clj-rate-limiter | clj-bucket4j |
 |---|---|---|---|---|---|---|---|
@@ -317,19 +312,6 @@ Not yet
 - Penalties, e.g. blocking a client for an hour after abuse
 - The draft's partition keys and problem types
 
-Principles
-----------
-
-- **Standards first.** The code follows RFC 6585, RFC 9110 and the IETF
-  draft, and cites their sections. The tests include the examples of RFC
-  5952, RFC 7239 and the draft.
-- **Plain data.** Policies, results and decisions are maps, and a key can
-  be any value.
-- **Pure arithmetic.** The algorithms take the time as an argument, so
-  the tests run on a simulated clock.
-- **One codebase.** The library is written in `.cljc` and has no
-  dependencies.
-
 Development
 -----------
 
@@ -343,8 +325,9 @@ clojure -M:cljs release bench && node target/bench.js # benchmarks in Node
 ```
 
 The :pedestal alias also runs the interceptor in Pedestal 0.8's chain,
-which needs Java 17. The design and the research behind it are in
-[doc/proposal.md](doc/proposal.md).
+which needs Java 17. The code cites the sections of the specs that it
+follows, and the tests include their examples. The design and the
+research behind it are in [doc/proposal.md](doc/proposal.md).
 
 The public namespaces are the root, `store`, `ring` and `pedestal`. The
 internal ones are under `impl`:
