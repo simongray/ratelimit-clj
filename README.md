@@ -45,7 +45,7 @@ of the latest commit on `master`:
 
 ```clojure
 dk.simongray/ratelimit-clj {:git/url "https://github.com/simongray/ratelimit-clj"
-                            :git/sha "1ad0bb184c0b47688e80209ef8dbe8aa7e9318fd"}
+                            :git/sha "05a01ad6b23b555bd08206f762f6c9f075d39a24"}
 ```
 
 In shadow-cljs, a Git dependency only works through `deps.edn`, so set
