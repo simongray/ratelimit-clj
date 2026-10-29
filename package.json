@@ -1,0 +1,9 @@
+{
+  "name": "ratelimit-clj",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Node test tools for ratelimit-clj. The library itself has no npm dependencies.",
+  "devDependencies": {
+    "shadow-cljs": "^3.5.3"
+  }
+}

@@ -1,0 +1,10 @@
+{:deps   {:aliases [:cljs]}
+ :builds {;; clojure -M:cljs compile test
+          :test  {:target    :node-test
+                  :output-to "target/node-tests.js"
+                  :ns-regexp "-test$"
+                  :autorun   true}
+          ;; clojure -M:cljs release bench && node target/bench.js
+          :bench {:target    :node-script
+                  :output-to "target/bench.js"
+                  :main      dk.simongray.ratelimit.bench/-main}}}

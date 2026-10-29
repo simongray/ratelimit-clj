@@ -335,11 +335,12 @@ new state. Here is the next request after 400 at once:
 
 ```clojure
 (ratelimit/consume pages 60000.0 0 1)
-;; => {:allowed?    false
-;;     :remaining   0
-;;     :retry-after 0.15
-;;     :reset-after 60.0
-;;     :state       60000.0}
+;; => {:allowed?     false
+;;     :remaining    0
+;;     :retry-after  0.15
+;;     :refill-after 0.15
+;;     :reset-after  60.0
+;;     :state        60000.0}
 ```
 
 The times in a result are in seconds:
@@ -360,7 +361,7 @@ A cost of 0 checks without consuming.
 ```
 
 A store applies `consume` to the state of one key atomically. The memory
-store is a ConcurrentHashMap on the JVM and an atom in JavaScript. An entry
+store is a ConcurrentHashMap on the JVM and a map in JavaScript. An entry
 whose quota is full again holds nothing that a new key doesn't, so the
 store drops it in a sweep every so often. The writes run the sweep, so no
 thread is needed. The protocol has one function, so a Redis store could
@@ -377,8 +378,8 @@ external API: sleep for :retry-after and try again.
    {:name "sparql" :quota 60 :window 60 :when sparql?}])
 
 (ratelimit/limit! policies store request)
-;; => {:results [{:policy "pages" :key "203.0.113.7" :allowed? true ...}
-;;               {:policy "sparql" :key "203.0.113.7" :allowed? false
+;; => {:results [{:name "pages" :key "203.0.113.7" :allowed? true ...}
+;;               {:name "sparql" :key "203.0.113.7" :allowed? false
 ;;                :retry-after 4.2 ...}]
 ;;     :limited ["sparql"]}
 ```
@@ -447,7 +448,8 @@ options are:
 
 With :proxies, the address is the entry that your outermost proxy added to
 X-Forwarded-For, or to Forwarded when :header is "forwarded". With fewer
-entries than proxies, it's :remote-addr. The :prefix option sets how many
+entries than proxies, it's the leftmost, and without the field it's
+:remote-addr. The :prefix option sets how many
 bits of an IPv6 address count. A key can be any value, so a key of several
 parts is a vector, e.g. from `juxt`.
 
@@ -459,10 +461,9 @@ No function throws on anything a client sends. An address that doesn't
 parse is used as it is, as a string. A request whose key is nil isn't
 counted, as in nginx.
 
-A store that fails lets the request through and calls :on-error, as Stripe
-does. The memory store can't fail. A policy without a quota or a window,
-or two policies with the same name, throw when the middleware is made,
-since that's a mistake in the code rather than in a request.
+A policy without a quota or a window, or two policies with the same name,
+throw when the middleware is made, since that's a mistake in the code
+rather than in a request.
 
 
 Tests
@@ -566,3 +567,14 @@ After the proposal, on 29 October 2026:
 - **The RateLimit fields are off by default** until the draft settles. The
   :headers option turns them on for a given draft version.
 - **The library has a repository of its own**, next to conneg-clj.
+
+During the build:
+
+- **A store's errors aren't caught**, since the memory store has none. The
+  :on-error option waits for a store that can fail, e.g. Redis.
+- **Behind fewer proxies than the option says, the leftmost address
+  counts**, rather than :remote-addr. Every entry came from a proxy of
+  your own, while :remote-addr is the innermost proxy, which all clients
+  share.
+- **Each result in a decision has its policy's :name, :quota and
+  :window**, since the RateLimit fields need them.
