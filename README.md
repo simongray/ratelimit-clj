@@ -33,12 +33,17 @@ from your own code, e.g. to limit calls to an external API.
 Getting started
 ---------------
 
-The library needs Clojure 1.11+ and Java 11+. It isn't released yet, so
-add a checkout of this repository to the `:deps` in your `deps.edn`:
+The library needs Clojure 1.11+ and Java 11+. It isn't on Clojars yet, so
+add it to the `:deps` in your `deps.edn` as a Git dependency, with the SHA
+of the latest commit on `master`:
 
 ```clojure
-dk.simongray/ratelimit-clj {:local/root "../ratelimit-clj"}
+dk.simongray/ratelimit-clj {:git/url "https://github.com/simongray/ratelimit-clj"
+                            :git/sha "1ad0bb184c0b47688e80209ef8dbe8aa7e9318fd"}
 ```
+
+In shadow-cljs, a Git dependency only works through `deps.edn`, so set
+`:deps true` in your `shadow-cljs.edn` too.
 
 To limit each client to 400 requests a minute, put the Ring middleware
 around your handler:
